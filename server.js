@@ -9,21 +9,16 @@ const path = require("path");
 const execFileAsync = promisify(execFile);
 const app = express();
 app.use(cors());
-app.use(express.json());
 
 const YT_DLP_PATH = path.join(__dirname, "yt-dlp");
 
 const downloadYtDlp = () => {
   return new Promise((resolve, reject) => {
     if (fs.existsSync(YT_DLP_PATH)) {
-      console.log("yt-dlp already exists");
       return resolve();
     }
     console.log("Downloading yt-dlp...");
-    const url =
-      "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
     const file = fs.createWriteStream(YT_DLP_PATH);
-
     const download = (downloadUrl) => {
       https
         .get(downloadUrl, (response) => {
@@ -34,14 +29,15 @@ const downloadYtDlp = () => {
           file.on("finish", () => {
             file.close();
             fs.chmodSync(YT_DLP_PATH, "755");
-            console.log("✅ yt-dlp downloaded");
+            console.log("✅ yt-dlp ready");
             resolve();
           });
         })
         .on("error", reject);
     };
-
-    download(url);
+    download(
+      "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp",
+    );
   });
 };
 
@@ -56,68 +52,32 @@ app.get("/stream/:videoId", async (req, res) => {
   try {
     const url = `https://www.youtube.com/watch?v=${videoId}`;
 
-    const { stdout, stderr } = await execFileAsync(
+    // Sirf URL print karo — JSON nahi
+    const { stdout } = await execFileAsync(
       YT_DLP_PATH,
       [
         url,
-        "--dump-single-json",
+        "--get-url",
         "--no-warnings",
         "--no-check-certificates",
-        "--prefer-free-formats",
+        "--format",
+        "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
         "--no-playlist",
-        "--add-header",
-        "referer:youtube.com",
-        "--add-header",
-        `user-agent:Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36`,
       ],
       {
-        maxBuffer: 50 * 1024 * 1024, // 50MB buffer
+        maxBuffer: 10 * 1024 * 1024,
         timeout: 30000,
       },
     );
 
-    if (!stdout || stdout.trim() === "") {
-      console.error("Empty stdout, stderr:", stderr);
-      return res.status(500).json({ error: "Empty response from yt-dlp" });
+    const streamUrl = stdout.trim().split("\n")[0];
+
+    if (streamUrl && streamUrl.startsWith("http")) {
+      console.log(`✅ Stream mili: ${videoId}`);
+      return res.json({ url: streamUrl });
     }
 
-    let info;
-    try {
-      info = JSON.parse(stdout.trim());
-    } catch (parseErr) {
-      console.error("JSON parse error, stdout length:", stdout.length);
-      console.error("First 500 chars:", stdout.substring(0, 500));
-      return res.status(500).json({ error: "JSON parse failed" });
-    }
-
-    const formats = info.formats ?? [];
-
-    const audioOnly = formats
-      .filter(
-        (f) =>
-          f.url &&
-          f.vcodec === "none" &&
-          f.acodec !== "none" &&
-          f.ext !== "mhtml" &&
-          (f.ext === "m4a" || f.ext === "webm" || f.ext === "mp4"),
-      )
-      .sort((a, b) => (b.abr ?? 0) - (a.abr ?? 0));
-
-    const combined = formats
-      .filter(
-        (f) =>
-          f.url && f.acodec !== "none" && f.ext !== "mhtml" && f.ext !== "jpg",
-      )
-      .sort((a, b) => (b.abr ?? 0) - (a.abr ?? 0));
-
-    const best = audioOnly[0] ?? combined[0];
-
-    if (best?.url) {
-      console.log(`✅ Stream mili: ${videoId} | ${best.ext} | ${best.abr}kbps`);
-      return res.json({ url: best.url, format: best.ext, bitrate: best.abr });
-    }
-
-    return res.status(404).json({ error: "No audio stream found" });
+    return res.status(404).json({ error: "No stream found" });
   } catch (e) {
     console.error(`❌ Error:`, e.message);
     return res.status(500).json({ error: e.message });
@@ -133,6 +93,6 @@ downloadYtDlp()
     });
   })
   .catch((e) => {
-    console.error("Failed to download yt-dlp:", e);
+    console.error("yt-dlp download failed:", e);
     process.exit(1);
   });
