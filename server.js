@@ -11,21 +11,20 @@ const app = express();
 app.use(cors());
 
 const YT_DLP_PATH = path.join(__dirname, "yt-dlp");
+const COOKIES_PATH = path.join(__dirname, "cookies.txt");
 
 const downloadYtDlp = () => {
   return new Promise((resolve, reject) => {
-    if (fs.existsSync(YT_DLP_PATH)) {
-      return resolve();
-    }
+    if (fs.existsSync(YT_DLP_PATH)) return resolve();
     console.log("Downloading yt-dlp...");
     const file = fs.createWriteStream(YT_DLP_PATH);
-    const download = (downloadUrl) => {
+    const download = (url) => {
       https
-        .get(downloadUrl, (response) => {
-          if (response.statusCode === 301 || response.statusCode === 302) {
-            return download(response.headers.location);
+        .get(url, (res) => {
+          if (res.statusCode === 301 || res.statusCode === 302) {
+            return download(res.headers.location);
           }
-          response.pipe(file);
+          res.pipe(file);
           file.on("finish", () => {
             file.close();
             fs.chmodSync(YT_DLP_PATH, "755");
@@ -41,6 +40,18 @@ const downloadYtDlp = () => {
   });
 };
 
+const setupCookies = () => {
+  const base64 = process.env.YT_COOKIES_BASE64;
+  if (base64) {
+    const buf = Buffer.from(base64, "base64");
+    fs.writeFileSync(COOKIES_PATH, buf);
+    console.log("✅ Cookies loaded from env");
+    return true;
+  }
+  console.warn("⚠️ No cookies env variable found");
+  return false;
+};
+
 app.get("/", (req, res) => {
   res.json({ status: "TrendBeats Stream Server Running ✅" });
 });
@@ -51,26 +62,33 @@ app.get("/stream/:videoId", async (req, res) => {
 
   try {
     const url = `https://www.youtube.com/watch?v=${videoId}`;
+    const hasCookies = fs.existsSync(COOKIES_PATH);
+    console.log(`Cookies available: ${hasCookies}`);
 
-    // Sirf URL print karo — JSON nahi
-    const { stdout } = await execFileAsync(
-      YT_DLP_PATH,
-      [
-        url,
-        "--get-url",
-        "--no-warnings",
-        "--no-check-certificates",
-        "--format",
-        "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
-        "--no-playlist",
-        "--extractor-args",
-        "youtube:player_client=android",
-      ],
-      {
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: 30000,
-      },
-    );
+    const args = [
+      url,
+      "--get-url",
+      "--no-warnings",
+      "--no-check-certificates",
+      "--format",
+      "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+      "--no-playlist",
+      "--extractor-args",
+      "youtube:player_client=android,web",
+    ];
+
+    if (hasCookies) {
+      args.push("--cookies", COOKIES_PATH);
+      console.log("Using cookies file");
+    }
+
+    console.log("Running:", YT_DLP_PATH, args.join(" "));
+
+    const { stdout } = await execFileAsync(YT_DLP_PATH, args, {
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 30000,
+    });
+
     const streamUrl = stdout.trim().split("\n")[0];
 
     if (streamUrl && streamUrl.startsWith("http")) {
@@ -89,11 +107,12 @@ const PORT = process.env.PORT || 3000;
 
 downloadYtDlp()
   .then(() => {
+    setupCookies();
     app.listen(PORT, () => {
       console.log(`🎵 TrendBeats Server running on port ${PORT}`);
     });
   })
   .catch((e) => {
-    console.error("yt-dlp download failed:", e);
+    console.error("Setup failed:", e);
     process.exit(1);
   });
