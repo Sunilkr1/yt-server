@@ -10,9 +10,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "yt-dlp-exec": "^1.0.2",
-    "ytdl-core": "^4.11.5"
+    "yt-dlp-exec": "^1.0.2"
   }
 }
