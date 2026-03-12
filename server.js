@@ -63,13 +63,14 @@ app.get("/stream/:videoId", async (req, res) => {
         "--format",
         "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
         "--no-playlist",
+        "--extractor-args",
+        "youtube:player_client=android",
       ],
       {
         maxBuffer: 10 * 1024 * 1024,
         timeout: 30000,
       },
     );
-
     const streamUrl = stdout.trim().split("\n")[0];
 
     if (streamUrl && streamUrl.startsWith("http")) {
