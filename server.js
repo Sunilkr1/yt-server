@@ -52,6 +52,36 @@ const setupCookies = () => {
   return false;
 };
 
+const getStreamUrl = async (videoId, format) => {
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+  const hasCookies = fs.existsSync(COOKIES_PATH);
+
+  const args = [
+    url,
+    "--get-url",
+    "--no-warnings",
+    "--no-check-certificates",
+    "--format",
+    format,
+    "--no-playlist",
+    "--extractor-args",
+    "youtube:player_client=android,web",
+  ];
+
+  if (hasCookies) {
+    args.push("--cookies", COOKIES_PATH);
+  }
+
+  const { stdout } = await execFileAsync(YT_DLP_PATH, args, {
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 30000,
+  });
+
+  const streamUrl = stdout.trim().split("\n")[0];
+  if (streamUrl && streamUrl.startsWith("http")) return streamUrl;
+  return null;
+};
+
 app.get("/", (req, res) => {
   res.json({ status: "TrendBeats Stream Server Running ✅" });
 });
@@ -60,47 +90,31 @@ app.get("/stream/:videoId", async (req, res) => {
   const { videoId } = req.params;
   if (!videoId) return res.status(400).json({ error: "videoId required" });
 
-  try {
-    const url = `https://www.youtube.com/watch?v=${videoId}`;
-    const hasCookies = fs.existsSync(COOKIES_PATH);
-    console.log(`Cookies available: ${hasCookies}`);
+  // Multiple formats try karo — ek na ek kaam karega
+  const formats = [
+    "best",
+    "worst",
+    "bestaudio",
+    "18", // 360p mp4 — audio+video
+    "17", // 144p 3gp
+  ];
 
-    const args = [
-      url,
-      "--get-url",
-      "--no-warnings",
-      "--no-check-certificates",
-      "--format",
-      "bestaudio/best",
-      "--no-playlist",
-      "--extractor-args",
-      "youtube:player_client=android,web",
-    ];
-
-    if (hasCookies) {
-      args.push("--cookies", COOKIES_PATH);
-      console.log("Using cookies file");
+  for (const format of formats) {
+    try {
+      console.log(`Trying format: ${format} for ${videoId}`);
+      const url = await getStreamUrl(videoId, format);
+      if (url) {
+        console.log(`✅ Stream mili with format ${format}: ${videoId}`);
+        return res.json({ url, format });
+      }
+    } catch (e) {
+      console.warn(`Format ${format} failed:`, e.message.split("\n")[0]);
+      continue;
     }
-
-    console.log("Running:", YT_DLP_PATH, args.join(" "));
-
-    const { stdout } = await execFileAsync(YT_DLP_PATH, args, {
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 30000,
-    });
-
-    const streamUrl = stdout.trim().split("\n")[0];
-
-    if (streamUrl && streamUrl.startsWith("http")) {
-      console.log(`✅ Stream mili: ${videoId}`);
-      return res.json({ url: streamUrl });
-    }
-
-    return res.status(404).json({ error: "No stream found" });
-  } catch (e) {
-    console.error(`❌ Error:`, e.message);
-    return res.status(500).json({ error: e.message });
   }
+
+  console.error(`❌ All formats failed for: ${videoId}`);
+  return res.status(404).json({ error: "No stream found" });
 });
 
 const PORT = process.env.PORT || 3000;
