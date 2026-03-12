@@ -70,25 +70,17 @@ const getStreamUrl = async (videoId, format) => {
     args.push("--cookies", COOKIES_PATH);
   }
 
-  try {
-    const { stdout, stderr } = await execFileAsync(YT_DLP_PATH, args, {
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 30000,
-    });
+  const { stdout, stderr } = await execFileAsync(YT_DLP_PATH, args, {
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 30000,
+  });
 
-    // Asli error log karo
-    if (stderr) console.log(`STDERR: ${stderr}`);
+  if (stderr) console.log(`STDERR: ${stderr}`);
 
-    const streamUrl = stdout.trim().split("\n")[0];
-    if (streamUrl && streamUrl.startsWith("http")) return streamUrl;
-    return null;
-  } catch (e) {
-    // Poora error dikho
-    console.error(`FULL ERROR: ${e.message}`);
-    throw e;
-  }
+  const streamUrl = stdout.trim().split("\n")[0];
+  if (streamUrl && streamUrl.startsWith("http")) return streamUrl;
+  return null;
 };
-
 app.get("/", (req, res) => {
   res.json({ status: "TrendBeats Stream Server Running ✅" });
 });
