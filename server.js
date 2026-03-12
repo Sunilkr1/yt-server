@@ -13,7 +13,6 @@ app.use(express.json());
 
 const YT_DLP_PATH = path.join(__dirname, "yt-dlp");
 
-// yt-dlp download karo agar nahi hai
 const downloadYtDlp = () => {
   return new Promise((resolve, reject) => {
     if (fs.existsSync(YT_DLP_PATH)) {
@@ -24,21 +23,13 @@ const downloadYtDlp = () => {
     const url =
       "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
     const file = fs.createWriteStream(YT_DLP_PATH);
-    https
-      .get(url, (response) => {
-        if (response.statusCode === 302 || response.statusCode === 301) {
-          https
-            .get(response.headers.location, (res) => {
-              res.pipe(file);
-              file.on("finish", () => {
-                file.close();
-                fs.chmodSync(YT_DLP_PATH, "755");
-                console.log("✅ yt-dlp downloaded");
-                resolve();
-              });
-            })
-            .on("error", reject);
-        } else {
+
+    const download = (downloadUrl) => {
+      https
+        .get(downloadUrl, (response) => {
+          if (response.statusCode === 301 || response.statusCode === 302) {
+            return download(response.headers.location);
+          }
           response.pipe(file);
           file.on("finish", () => {
             file.close();
@@ -46,9 +37,11 @@ const downloadYtDlp = () => {
             console.log("✅ yt-dlp downloaded");
             resolve();
           });
-        }
-      })
-      .on("error", reject);
+        })
+        .on("error", reject);
+    };
+
+    download(url);
   });
 };
 
@@ -63,19 +56,40 @@ app.get("/stream/:videoId", async (req, res) => {
   try {
     const url = `https://www.youtube.com/watch?v=${videoId}`;
 
-    const { stdout } = await execFileAsync(YT_DLP_PATH, [
-      url,
-      "--dump-single-json",
-      "--no-warnings",
-      "--no-check-certificates",
-      "--prefer-free-formats",
-      "--add-header",
-      "referer:youtube.com",
-      "--add-header",
-      "user-agent:Mozilla/5.0",
-    ]);
+    const { stdout, stderr } = await execFileAsync(
+      YT_DLP_PATH,
+      [
+        url,
+        "--dump-single-json",
+        "--no-warnings",
+        "--no-check-certificates",
+        "--prefer-free-formats",
+        "--no-playlist",
+        "--add-header",
+        "referer:youtube.com",
+        "--add-header",
+        `user-agent:Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36`,
+      ],
+      {
+        maxBuffer: 50 * 1024 * 1024, // 50MB buffer
+        timeout: 30000,
+      },
+    );
 
-    const info = JSON.parse(stdout);
+    if (!stdout || stdout.trim() === "") {
+      console.error("Empty stdout, stderr:", stderr);
+      return res.status(500).json({ error: "Empty response from yt-dlp" });
+    }
+
+    let info;
+    try {
+      info = JSON.parse(stdout.trim());
+    } catch (parseErr) {
+      console.error("JSON parse error, stdout length:", stdout.length);
+      console.error("First 500 chars:", stdout.substring(0, 500));
+      return res.status(500).json({ error: "JSON parse failed" });
+    }
+
     const formats = info.formats ?? [];
 
     const audioOnly = formats
@@ -99,7 +113,7 @@ app.get("/stream/:videoId", async (req, res) => {
     const best = audioOnly[0] ?? combined[0];
 
     if (best?.url) {
-      console.log(`✅ Stream mili: ${videoId}`);
+      console.log(`✅ Stream mili: ${videoId} | ${best.ext} | ${best.abr}kbps`);
       return res.json({ url: best.url, format: best.ext, bitrate: best.abr });
     }
 
@@ -112,7 +126,6 @@ app.get("/stream/:videoId", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Pehle yt-dlp download karo, phir server start karo
 downloadYtDlp()
   .then(() => {
     app.listen(PORT, () => {
