@@ -12,7 +12,6 @@ const app = express();
 app.use(cors());
 
 const YT_DLP_PATH = path.join(__dirname, "yt-dlp");
-const COOKIES_PATH = path.join(__dirname, "cookies.txt");
 
 /* ---------- Download yt-dlp ---------- */
 
@@ -49,20 +48,16 @@ const downloadYtDlp = () => {
   });
 };
 
-/* ---------- Cookies Setup ---------- */
+/* ---------- Update yt-dlp ---------- */
 
-const setupCookies = () => {
-  const base64 = process.env.YT_COOKIES_BASE64;
-
-  if (base64) {
-    const buf = Buffer.from(base64, "base64");
-    fs.writeFileSync(COOKIES_PATH, buf);
-    console.log("✅ Cookies loaded");
-    return true;
+const updateYtDlp = async () => {
+  try {
+    console.log("Updating yt-dlp...");
+    await execFileAsync(YT_DLP_PATH, ["-U"]);
+    console.log("✅ yt-dlp updated");
+  } catch (e) {
+    console.log("yt-dlp update skipped");
   }
-
-  console.log("⚠️ No cookies provided");
-  return false;
 };
 
 /* ---------- Get Stream URL ---------- */
@@ -78,49 +73,34 @@ const getStreamUrl = async (videoId, format) => {
     "--format",
     format,
     "--no-playlist",
+    "--extractor-args",
+    "youtube:player_client=android",
   ];
 
-  if (fs.existsSync(COOKIES_PATH)) {
-    args.push("--cookies", COOKIES_PATH);
+  const { stdout, stderr } = await execFileAsync(YT_DLP_PATH, args, {
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 30000,
+  });
+
+  if (stderr) console.log("STDERR:", stderr);
+
+  const streamUrl = stdout.trim().split("\n")[0];
+
+  if (streamUrl && streamUrl.startsWith("http")) {
+    return streamUrl;
   }
 
-  try {
-    const { stdout, stderr } = await execFileAsync(YT_DLP_PATH, args, {
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 30000,
-    });
-
-    if (stderr) {
-      console.log("STDERR:", stderr);
-    }
-
-    const streamUrl = stdout.trim().split("\n")[0];
-
-    if (streamUrl && streamUrl.startsWith("http")) {
-      return streamUrl;
-    }
-
-    return null;
-  } catch (error) {
-    console.log("STDERR:", error.stderr);
-    throw error;
-  }
+  return null;
 };
 
 /* ---------- Routes ---------- */
 
 app.get("/", (req, res) => {
-  res.json({
-    status: "TrendBeats Stream Server Running ✅",
-  });
+  res.json({ status: "TrendBeats Stream Server Running ✅" });
 });
 
 app.get("/stream/:videoId", async (req, res) => {
   const { videoId } = req.params;
-
-  if (!videoId) {
-    return res.status(400).json({ error: "videoId required" });
-  }
 
   const formats = ["bestaudio/best", "bestaudio", "best"];
 
@@ -139,16 +119,13 @@ app.get("/stream/:videoId", async (req, res) => {
         });
       }
     } catch (e) {
-      console.warn(`Format ${format} failed:`, e.message.split("\n")[0]);
-      continue;
+      console.log(`Format ${format} failed`);
     }
   }
 
-  console.error(`❌ All formats failed for: ${videoId}`);
+  console.log("❌ All formats failed");
 
-  return res.status(404).json({
-    error: "No stream found",
-  });
+  res.status(404).json({ error: "No stream found" });
 });
 
 /* ---------- Start Server ---------- */
@@ -156,14 +133,12 @@ app.get("/stream/:videoId", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 downloadYtDlp()
+  .then(updateYtDlp)
   .then(() => {
-    setupCookies();
-
     app.listen(PORT, () => {
-      console.log(`🎵 TrendBeats Server running on port ${PORT}`);
+      console.log(`🎵 Server running on ${PORT}`);
     });
   })
   .catch((e) => {
     console.error("Setup failed:", e);
-    process.exit(1);
   });
