@@ -71,7 +71,7 @@ app.get("/stream/:videoId", async (req, res) => {
       "--no-warnings",
       "--no-check-certificates",
       "--format",
-      "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+      "bestaudio/best",
       "--no-playlist",
       "--extractor-args",
       "youtube:player_client=android,web",
